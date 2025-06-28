@@ -39,6 +39,34 @@ def chip_atlas_add_experiment_target_cell(
 # dataset for CHIP ATLAS - all peaks
 
 class BigWigDataset(Dataset):
+    """
+    Dataset for loading and processing BigWig data along with corresponding
+    genomic sequences and transcription factor protein sequences.
+
+    Args:
+        factor_fasta_folder (str): Path to the folder containing transcription factor FASTA files.
+        bigwig_folder (str): Path to the folder containing BigWig files.
+        enformer_loci_path (str): Path to the BED file containing Enformer loci.
+        fasta_file (str): Path to the genome FASTA file.
+        annot_file (str, optional): Path to the annotation file. Defaults to None.
+        filter_chromosome_ids (list, optional): List of chromosome IDs to include. Defaults to None.
+        exclude_targets (list, optional): List of targets to exclude. Defaults to None.
+        include_targets (list, optional): List of targets to include. Defaults to None.
+        exclude_cell_types (list, optional): List of cell types to exclude. Defaults to None.
+        include_cell_types (list, optional): List of cell types to include. Defaults to None.
+        df_frac (float, optional): Fraction of the annotation dataframe to use. Defaults to 1.0.
+        experiments_json_path (str, optional): Path to the experiments JSON file. Defaults to None.
+        include_biotypes_metadata_in_context (bool, optional): Whether to include biotypes metadata in the context. Defaults to False.
+        biotypes_metadata_path (str, optional): Path to the biotypes metadata file. Defaults to None.
+        filter_sequences_by (tuple, optional): Tuple containing column name and value to filter sequences by. Defaults to None.
+        include_biotypes_metadata_columns (list, optional): List of biotypes metadata columns to include. Defaults to [].
+        biotypes_metadata_delimiter (str, optional): Delimiter for biotypes metadata. Defaults to ' | '.
+        only_ref (list, optional): List of reference genomes to include. Defaults to ['mm10', 'hg38'].
+        factor_species_priority (list, optional): List of species priority for transcription factors. Defaults to ['human', 'mouse'].
+        downsample_factor (int, optional): Factor by which to downsample BigWig data. Defaults to 128.
+        target_length (int, optional): Target length of the output BigWig signal. Defaults to 896.
+        bigwig_reduction_type (str, optional): Reduction type for BigWig data ('sum' or 'mean'). Defaults to 'sum'.
+    """
     def __init__(
         self,
         *,
@@ -212,6 +240,22 @@ class BigWigDataset(Dataset):
 # BigWig dataset for tracks only
 
 class BigWigTracksOnlyDataset(Dataset):
+    """
+    Dataset for loading and processing BigWig data for tracks only, without
+    transcription factor protein sequences.
+
+    Args:
+        bigwig_folder (str): Path to the folder containing BigWig files.
+        enformer_loci_path (str): Path to the BED file containing Enformer loci.
+        fasta_file (str): Path to the genome FASTA file.
+        ref (str): Reference genome (e.g., 'hg38', 'mm10').
+        annot_file (str, optional): Path to the annotation file. Defaults to None.
+        filter_chromosome_ids (list, optional): List of chromosome IDs to include. Defaults to None.
+        downsample_factor (int, optional): Factor by which to downsample BigWig data. Defaults to 128.
+        target_length (int, optional): Target length of the output BigWig signal. Defaults to 896.
+        bigwig_reduction_type (str, optional): Reduction type for BigWig data ('sum' or 'mean'). Defaults to 'sum'.
+        filter_sequences_by (tuple, optional): Tuple containing column name and value to filter sequences by. Defaults to None.
+    """
     def __init__(
         self,
         *,
@@ -330,10 +374,30 @@ class BigWigTracksOnlyDataset(Dataset):
 # data loader
 
 def bigwig_collate_fn(data):
+    """
+    Collate function for BigWigDataset.
+
+    Args:
+        data (list): List of tuples (seq, aa_seq, context_str, labels).
+
+    Returns:
+        tuple: Batched (seq, aa_seq, context_str, labels).
+    """
     seq, aa_seq, context_str, labels = list(zip(*data))
     return torch.stack(seq), tuple(aa_seq), tuple(context_str), torch.stack(labels)
 
 def get_bigwig_dataloader(ds, cycle_iter = False, **kwargs):
+    """
+    Returns a DataLoader for BigWigDataset.
+
+    Args:
+        ds (BigWigDataset): The dataset.
+        cycle_iter (bool, optional): Whether to cycle the iterator. Defaults to False.
+        **kwargs: Additional arguments for DataLoader.
+
+    Returns:
+        torch.utils.data.DataLoader: The DataLoader instance.
+    """
     dataset_len = len(ds)
     batch_size = kwargs.get('batch_size')
     drop_last = dataset_len > batch_size
@@ -343,6 +407,17 @@ def get_bigwig_dataloader(ds, cycle_iter = False, **kwargs):
     return wrapper(dl)
 
 def get_bigwig_tracks_dataloader(ds, cycle_iter = False, **kwargs):
+    """
+    Returns a DataLoader for BigWigTracksOnlyDataset.
+
+    Args:
+        ds (BigWigTracksOnlyDataset): The dataset.
+        cycle_iter (bool, optional): Whether to cycle the iterator. Defaults to False.
+        **kwargs: Additional arguments for DataLoader.
+
+    Returns:
+        torch.utils.data.DataLoader: The DataLoader instance.
+    """
     dataset_len = len(ds)
     batch_size = kwargs.get('batch_size')
     drop_last = dataset_len > batch_size
