@@ -10,6 +10,8 @@ import shutil
 from tf_bind_transformer.data_bigwig import BigWigDataset, BigWigTracksOnlyDataset, get_bigwig_dataloader, get_bigwig_tracks_dataloader
 from tf_bind_transformer.data import FactorProteinDataset # Assuming this is needed for BigWigDataset
 
+ENFORMER_LENGTH = 196_608
+
 
 # Helper function to create a dummy BigWig file
 def create_dummy_bigwig(path, chrom_sizes, intervals):
@@ -34,13 +36,13 @@ def create_dummy_bed(path, entries):
 # Helper function to create a dummy annotation file
 def create_dummy_annot_file(path, data):
     df = pl.DataFrame(data)
-    df.write_csv(path, separator='\t', has_header=False)
+    df.write_csv(path, separator='\t', include_header=False)
 
 
 class TestBigWigData(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.test_data_dir = Path("tf_bind_transformer/tests/data_bigwig_test_temp")
+        cls.test_data_dir = Path("tests/data_bigwig_test_temp")
         cls.test_data_dir.mkdir(parents=True, exist_ok=True)
 
         cls.factor_fasta_folder = cls.test_data_dir / "factor_fastas"
@@ -68,13 +70,12 @@ class TestBigWigData(unittest.TestCase):
         # format: chr, start, end, gene_name (or other identifier)
         enformer_loci_data = [
             ("chr1", 10000, 10000 + 114688, "locus1_train", 0, "+", "train"),
-            ("chr1", 50000, 50000 + 114688, "locus2_valid", 0, "+", "valid"),
+            ("chr1", 150_000, 200_000, "locus2_valid", 0, "+", "valid"),
             ("chr2", 20000, 20000 + 114688, "locus3_test", 0, "+", "test"),
         ]
-        # Save as bed with 7 columns to match expected format by `read_bed` and subsequent filtering
         with open(cls.enformer_loci_path, "w") as f:
             for entry in enformer_loci_data:
-                 f.write(f"{entry[0]}\t{entry[1]}\t{entry[2]}\t{entry[3]}\t{entry[4]}\t{entry[5]}\t{entry[6]}\n")
+                f.write(f'{"\t".join([str(i) for i in entry[0:7]])}\n')
 
 
         # Create dummy annotation file for BigWigDataset
@@ -105,15 +106,15 @@ class TestBigWigData(unittest.TestCase):
         # For exp1 (TF1, cellA)
         # Locus1: chr1:10000-124688. Downsampled target length will be 896. Original length 114688
         intervals_exp1 = [
-            ("chr1", 10000, 10000 + 114688, 1.0), # locus1
-            ("chr1", 50000, 50000 + 114688, 1.5), # locus2
+            ("chr1", 10000, 10000 + 114688, 1.0),
+            ("chr1", 150_000, 200_000, 1.5),
         ]
         create_dummy_bigwig(cls.bigwig_folder / "exp1.bw", chrom_sizes_hg38, intervals_exp1)
 
         # For exp2 (TF2, cellB)
         intervals_exp2 = [
-            ("chr1", 10000, 10000 + 114688, 2.0), # locus1
-            ("chr1", 50000, 50000 + 114688, 2.5), # locus2
+            ("chr1", 10000, 10000 + 114688, 2.0),
+            ("chr1", 150_000, 200_000, 2.5),
         ]
         create_dummy_bigwig(cls.bigwig_folder / "exp2.bw", chrom_sizes_hg38, intervals_exp2)
 
@@ -222,8 +223,12 @@ class TestBigWigData(unittest.TestCase):
 
 
     def test_bigwig_tracks_only_dataset_getitem(self):
-        dataset = BigWigTracksOnlyDataset(**self.common_params_tracks_dataset, filter_sequences_by=('column_7', 'train'),
-                                          downsample_factor=128, target_length=896)
+        dataset = BigWigTracksOnlyDataset(
+            **self.common_params_tracks_dataset, # type: ignore
+            filter_sequences_by=('column_7', 'train'),
+            downsample_factor=128
+        )
+
         # Locus1 (chr1:10000-124688). Values from exp1 (1.0) and exp2 (2.0)
         seq, label = dataset[0] # Only one locus due to filter_sequences_by
 

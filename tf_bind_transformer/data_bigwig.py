@@ -28,11 +28,11 @@ def chip_atlas_add_experiment_target_cell(
 
     targets = df.select(col_target)
     targets = targets.to_series(0).str.to_uppercase().rename('target')
-    df.insert_at_idx(2, targets)
+    df.insert_column(2, targets)
 
     cell_type = df.select(col_cell_type)
     cell_type = cell_type.rename({col_cell_type: 'cell_type'}).to_series(0)
-    df.insert_at_idx(2, cell_type)
+    df.insert_column(2, cell_type)
 
     return df
 
@@ -109,7 +109,7 @@ class BigWigDataset(Dataset):
         assert len(bw_experiments) > 0, 'no bigwig files found in bigwig folder'
 
         loci = read_bed(enformer_loci_path)
-        annot_df = pl.read_csv(annot_file, sep = "\t", has_headers = False, columns = list(map(lambda i: f'column_{i + 1}', range(17))))
+        annot_df = pl.read_csv(annot_file, separator = "\t", has_header = False, columns = list(map(lambda i: f'column_{i + 1}', range(17))))
 
         annot_df = annot_df.filter(pl_isin('column_2', only_ref))
         annot_df = filter_by_col_isin(annot_df, 'column_1', bw_experiments)
@@ -287,7 +287,7 @@ class BigWigTracksOnlyDataset(Dataset):
 
         loci = read_bed(enformer_loci_path)
 
-        annot_df = pl.read_csv(annot_file, sep = "\t", has_headers = False, columns = list(map(lambda i: f'column_{i + 1}', range(17))))
+        annot_df = pl.read_csv(annot_file, separator = "\t", has_header = False, columns = list(map(lambda i: f'column_{i + 1}', range(17))))
 
         annot_df = annot_df.filter(pl.col('column_2') == ref)
         annot_df = filter_by_col_isin(annot_df, 'column_1', bw_experiments)

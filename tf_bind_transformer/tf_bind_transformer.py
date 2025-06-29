@@ -12,7 +12,7 @@ from contextlib import contextmanager
 
 from enformer_pytorch import Enformer
 from enformer_pytorch.modeling_enformer import poisson_loss, pearson_corr_coef
-from enformer_pytorch.finetune import freeze_batchnorms_, freeze_all_but_layernorms_, unfreeze_last_n_layers_, unfreeze_all_layers_
+from enformer_pytorch.finetune import freeze_batchnorms_, freeze_all_but_layernorms_, unfreeze_all_layers_
 
 from logavgexp_pytorch import logavgexp
 
@@ -486,7 +486,10 @@ class AdapterModel(nn.Module):
         # if unfreezing last N layers of enformer
 
         if unfreeze_enformer_last_n_layers > 0:
-            unfreeze_last_n_layers_(self.enformer, unfreeze_enformer_last_n_layers)
+            # Change in enformer-pytorch
+            #unfreeze_last_n_layers_(self.enformer, unfreeze_enformer_last_n_layers)
+            raise NotImplementedError
+            
 
         # genetic sequence embedding
 

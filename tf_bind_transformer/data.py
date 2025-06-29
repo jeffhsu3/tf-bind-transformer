@@ -38,10 +38,10 @@ def cast_list(val = None):
     return [val] if not isinstance(val, (tuple, list)) else val
 
 def read_bed(path):
-    return pl.read_csv(path, sep = '\t', has_headers = False)
+    return pl.read_csv(path, separator = '\t', has_header = False)
 
 def save_bed(df, path):
-    df.to_csv(path, sep = '\t', has_header = False)
+    df.to_csv(path, separator = '\t', has_header = False)
 
 def parse_exp_target_cell(exp_target_cell):
     experiment, target, *cell_type = exp_target_cell.split('.')
@@ -312,7 +312,7 @@ class ContextDataset(Dataset):
             else:
                 raise ValueError(f'invalid suffix {p.suffix} for biotypes')
 
-            self.df = pl.read_csv(str(p), sep = sep)
+            self.df = pl.read_csv(str(p), separator = sep)
 
     def __len__():
         return len(self.df) if self.include_biotypes_metadata_in_context else -1

@@ -29,9 +29,11 @@ setup(
     'polars',
     'python-dotenv',
     'sentencepiece',
+    'pybedtools',
     'torch>=1.6',
     'transformers>=4.0',
-    'tqdm'
+    'tqdm',
+    'pyBigWig',
   ],
   classifiers=[
     'Development Status :: 4 - Beta',
