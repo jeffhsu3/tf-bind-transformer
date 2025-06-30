@@ -3,6 +3,7 @@ from dotenv import load_dotenv
 # set path to cache in .env and unset the next comment
 # load_dotenv()
 
+import wandb
 from enformer_pytorch import Enformer
 from tf_bind_transformer import AdapterModel, Trainer
 
@@ -30,23 +31,22 @@ model = AdapterModel(
     aa_embed_encoder = 'protalbert'
 ).cuda()
 
+# initialize wandb
+wandb.init(project="tf-bind-transformer")
 
 # training constants
 
 BATCH_SIZE = 2
 GRAD_ACCUM_STEPS = 8
-
-# effective batch size of BATCH_SIZE * GRAD_ACCUM_STEPS = 16
-
 VALIDATE_EVERY = 250
 GRAD_CLIP_MAX_NORM = 1.5
+CONTEXT_LENGTH = 4096
+LEARNING_RATE = 3e-4 # Default LR in Trainer, added here for logging
 
 REMAP_FILE_PATH = './remap2022_all.bed'
 TFACTOR_FOLDER = './tfactor.fastas'
 FASTA_FILE_PATH = './hg38.ml.fa'
 NON_PEAK_PATH = './generated-non-peaks.bed'
-
-CONTEXT_LENGTH = 4096
 
 SCOPED_NEGS_REMAP_PATH = './neg-npy/remap2022.bed'
 SCOPED_NEGS_PATH = './neg-npy'
@@ -56,10 +56,25 @@ VALID_CHROMOSOMES = [*range(2, 24, 2)]      # validate on even
 
 HELD_OUT_TARGET = ['AFF4']
 
+# Log hyperparameters to W&B
+wandb.config.update({
+    "batch_size": BATCH_SIZE,
+    "grad_accum_steps": GRAD_ACCUM_STEPS,
+    "effective_batch_size": BATCH_SIZE * GRAD_ACCUM_STEPS,
+    "validate_every": VALIDATE_EVERY,
+    "grad_clip_max_norm": GRAD_CLIP_MAX_NORM,
+    "context_length": CONTEXT_LENGTH,
+    "learning_rate": LEARNING_RATE, # Default from Trainer
+    "train_chromosomes": TRAIN_CHROMOSOMES,
+    "valid_chromosomes": VALID_CHROMOSOMES,
+    "held_out_target": HELD_OUT_TARGET
+})
+
 # trainer class for fine-tuning
 
 trainer = Trainer(
     model,
+    lr = LEARNING_RATE,
     context_length = CONTEXT_LENGTH,
     batch_size = BATCH_SIZE,
     validate_every = VALIDATE_EVERY,
@@ -78,6 +93,7 @@ trainer = Trainer(
 )
 
 # do gradient steps in a while loop
-
+# Note: wandb.finish() is called automatically on normal script termination.
+# For more robust cleanup, consider adding a try/finally block around this loop.
 while True:
     _ = trainer(finetune_enformer_ln_only = False)

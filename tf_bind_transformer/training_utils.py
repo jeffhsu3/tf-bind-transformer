@@ -1,4 +1,5 @@
 import torch
+import wandb
 from torch import nn
 from tf_bind_transformer.optimizer import get_optimizer
 from tf_bind_transformer.data import read_bed, collate_dl_outputs, get_dataloader, remap_df_add_experiment_target_cell
@@ -235,6 +236,7 @@ class Trainer(nn.Module):
             (total_loss / self.grad_accum_every).backward()
 
         print(f'{curr_step} loss: {log["total_loss"]}')
+        wandb.log({'train_loss': log['loss'], 'train_aux_loss': log['aux_loss'], 'train_total_loss': log['total_loss']}, step=curr_step)
 
         if exists(self.grad_clip_norm):
             nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip_norm)
@@ -244,7 +246,7 @@ class Trainer(nn.Module):
 
         if (curr_step % self.validate_every) == 0:
             self.model.eval()
-
+            valid_log = {}
             for _ in range(self.grad_accum_every):
                 seq, tf_aa, contextual_texts, peaks_nr, read_value, binary_target = collate_dl_outputs(next(self.valid_dl), next(self.valid_neg_dl))
                 seq, binary_target = seq.cuda(), binary_target.cuda()
@@ -258,16 +260,18 @@ class Trainer(nn.Module):
                 valid_loss = self.model.loss_fn(valid_logits, binary_target.float())
                 valid_accuracy = ((valid_logits.sigmoid() > 0.5).int() == binary_target).sum() / (binary_target.numel())
 
-                log = accum_log(log, {
+                valid_log = accum_log(valid_log, {
                     'valid_loss': valid_loss.item() / grad_accum_every,
                     'valid_accuracy': valid_accuracy.item() / grad_accum_every
                 })
 
-            print(f'{curr_step} valid loss: {log["valid_loss"]}')
-            print(f'{curr_step} valid accuracy: {log["valid_accuracy"]}')
+            print(f'{curr_step} valid loss: {valid_log["valid_loss"]}')
+            print(f'{curr_step} valid accuracy: {valid_log["valid_accuracy"]}')
+            wandb.log({'valid_loss': valid_log['valid_loss'], 'valid_accuracy': valid_log['valid_accuracy']}, step=curr_step)
 
             if curr_step > 0:
                 torch.save(self.model.state_dict(), self.checkpoint_filename)
+                wandb.save(self.checkpoint_filename)
 
         self.steps += 1
-        return log
+        return {**log, **valid_log} if (curr_step % self.validate_every) == 0 else log
