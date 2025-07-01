@@ -10,10 +10,11 @@ Run the following at the project root to download dependencies
 $ python setup.py install --user
 ```
 
-Then you must install `pybedtools`  as well as `pyBigWig`
+Then you must install `pybedtools` and `pyBigWig`. It's also recommended to install `polars`, `scikit-learn`, and `pyfaidx` if you plan to use all data processing and utility scripts:
 
 ```bash
 $ conda install --channel conda-forge --channel bioconda pybedtools pyBigWig
+$ pip install polars scikit-learn pyfaidx
 ```
 
 ## Usage
@@ -569,6 +570,52 @@ $ CLEAR_CACHE=1 python train.py
 - [ ] k-fold cross validation
 - [ ] output attention intermediates (or convolution output for hypertransformer), for interpreting binding site
 - [ ] use prefect.io to manage downloading of tfactors fastas, remap scoped negative peaks, blacklist filtering etc
+
+## Generating K-Fold Cross-Validation Splits
+
+The repository includes a script to generate BED files for k-fold cross-validation. These BED files define the genomic loci for training and testing sets for each fold.
+
+**Usage:**
+
+`python scripts/create_kfold_cv_splits.py [OPTIONS]`
+
+**Key Options:**
+
+*   **Loci Input (choose one):**
+    *   `--loci_bed_file PATH_TO_BED`: Provide an existing BED file defining all loci to be split.
+    *   `--fasta_file PATH_TO_FASTA`: Provide a genome FASTA file to generate random loci.
+        *   `--num_random_loci INT`: Number of random loci to generate (default: 10000).
+        *   `--locus_length INT`: Length of each random locus (default: 4096).
+*   **Required:**
+    *   `--k_folds INT`: The number of folds for cross-validation.
+    *   `--output_dir DIR_PATH`: Directory where the output `fold_i_train_loci.bed` and `fold_i_test_loci.bed` files will be saved.
+*   **Optional:**
+    *   `--seed INT`: Random seed for reproducibility (default: 42).
+
+**Example (using an existing BED file):**
+
+```bash
+python scripts/create_kfold_cv_splits.py \
+    --loci_bed_file path/to/your/all_loci.bed \
+    --k_folds 5 \
+    --output_dir path/to/cv_splits \
+    --seed 42
+```
+
+**Example (generating random loci from a FASTA):**
+
+```bash
+python scripts/create_kfold_cv_splits.py \
+    --fasta_file path/to/your/genome.fna \
+    --num_random_loci 20000 \
+    --locus_length 2048 \
+    --k_folds 10 \
+    --output_dir path/to/random_cv_splits \
+    --seed 123
+```
+
+The generated BED files can then be used as input (e.g., for `enformer_loci_path` in `BigWigDataset` or similar) when training models for each fold of the cross-validation.
+
 
 ## Appreciation
 

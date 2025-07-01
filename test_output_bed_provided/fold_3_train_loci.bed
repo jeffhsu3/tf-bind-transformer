@@ -1,0 +1,7 @@
+chr1	10	20	locus_A
+chr1	50	60	locus_B
+chr1	100	110	locus_C
+chrM	1	10	locus_F
+chr1	150	160	locus_H
+chr2	70	80	locus_I
+chrM	40	50	locus_J
