@@ -29,6 +29,7 @@ setup(
     'polars',
     'python-dotenv',
     'sentencepiece',
+    'scikit-learn',
     'pybedtools',
     'torch>=1.6',
     'transformers>=4.0',
