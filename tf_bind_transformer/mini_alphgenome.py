@@ -1,0 +1,318 @@
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import math
+from torch import einsum
+from einops import rearrange, reduce, repeat
+from einops.layers.torch import Rearrange, Reduce
+
+from alpha_encoder import SequenceEncoder, ConvBlock
+
+
+class RotaryEmbedding(nn.Module):
+    def __init__(self, dim, max_position=1024):
+        super().__init__()
+        self.dim = dim
+        self.max_position = max_position
+
+        inv_freq = 1.0 / (10000 ** (torch.arange(0, dim, 2).float() / dim))
+        self.register_buffer("inv_freq", inv_freq)
+
+    def forward(self, x, positions=None):
+        if positions is None:
+            positions = torch.arange(x.shape[1], device=x.device).float()
+
+        freqs = torch.outer(positions, self.inv_freq)
+        emb = torch.cat([freqs, freqs], dim=-1)
+
+        cos_emb = emb.cos()
+        sin_emb = emb.sin()
+
+        x1, x2 = x[..., ::2], x[..., 1::2]
+        rotated = torch.cat([-x2, x1], dim=-1)
+
+        return x * cos_emb + rotated * sin_emb
+
+
+class MultiHeadAttention(nn.Module):
+    def __init__(self, dim, heads=4, dim_head=32):
+        super().__init__()
+        self.heads = heads
+        self.dim_head = dim_head
+        self.scale = dim_head**-0.5
+
+        self.norm = nn.LayerNorm(dim)
+        self.to_q = nn.Linear(dim, heads * dim_head, bias=False)
+        self.to_k = nn.Linear(dim, dim_head, bias=False)
+        self.to_v = nn.Linear(dim, dim_head, bias=False)
+        self.to_out = nn.Linear(heads * dim_head, dim)
+
+        self.rope = RotaryEmbedding(dim_head)
+
+    def forward(self, x, attention_bias=None):
+        batch, seq_len, _ = x.shape
+
+        x = self.norm(x)
+
+        q = self.to_q(x).view(batch, seq_len, self.heads, self.dim_head)
+        k = self.to_k(x).view(batch, seq_len, 1, self.dim_head)
+        v = self.to_v(x).view(batch, seq_len, 1, self.dim_head)
+
+        q = self.rope(q)
+        k = self.rope(k)
+
+        q = q.transpose(1, 2)
+        k = k.transpose(1, 2)
+        v = v.transpose(1, 2)
+
+        attn = torch.matmul(q, k.transpose(-2, -1)) * self.scale
+
+        if attention_bias is not None:
+            attn = attn + attention_bias
+
+        attn = torch.tanh(attn / 5.0) * 5.0
+        attn = F.softmax(attn, dim=-1)
+
+        out = torch.matmul(attn, v)
+        out = out.transpose(1, 2).contiguous().view(batch, seq_len, -1)
+
+        return self.to_out(out)
+
+
+class MLPBlock(nn.Module):
+    def __init__(self, dim):
+        super().__init__()
+        self.norm = nn.LayerNorm(dim)
+        self.mlp = nn.Sequential(
+            nn.Linear(dim, dim * 2), nn.ReLU(), nn.Linear(dim * 2, dim)
+        )
+
+    def forward(self, x):
+        x = self.norm(x)
+        return self.mlp(x)
+
+
+class SimplePairwiseBlock(nn.Module):
+    def __init__(self, seq_dim, pair_dim=32):
+        super().__init__()
+        self.seq_dim = seq_dim
+        self.pair_dim = pair_dim
+
+        self.to_q = nn.Linear(seq_dim, pair_dim, bias=False)
+        self.to_k = nn.Linear(seq_dim, pair_dim, bias=False)
+        self.to_v = nn.Linear(seq_dim, pair_dim, bias=False)
+
+        self.proj = nn.Linear(pair_dim, pair_dim)
+        self.mlp = nn.Sequential(
+            nn.Linear(pair_dim, pair_dim * 2),
+            nn.ReLU(),
+            nn.Linear(pair_dim * 2, pair_dim),
+        )
+
+    def forward(self, x, pair_state=None):
+        batch, seq_len, _ = x.shape
+
+        # Downsample sequence for pairwise computation
+        x_pooled = F.avg_pool1d(x.transpose(1, 2), kernel_size=8).transpose(1, 2)
+
+        q = self.to_q(x_pooled)
+        k = self.to_k(x_pooled)
+        v = self.to_v(x_pooled)
+
+        attn = torch.matmul(q, k.transpose(-2, -1)) / math.sqrt(self.pair_dim)
+        pair_update = torch.matmul(attn, v)
+
+        pair_proj = self.proj(pair_update)
+
+        if pair_state is None:
+            pair_state = pair_proj
+        else:
+            pair_state = pair_state + pair_proj
+
+        pair_state = pair_state + self.mlp(pair_state)
+
+        return pair_state
+
+
+class TransformerTower(nn.Module):
+    def __init__(self, dim, heads=4, dim_head=32, pair_dim=32):
+        super().__init__()
+        self.attention = MultiHeadAttention(dim, heads, dim_head)
+        self.mlp = MLPBlock(dim)
+        self.pairwise = SimplePairwiseBlock(dim, pair_dim)
+
+        self.attention_bias_proj = nn.Linear(pair_dim, heads, bias=False)
+
+    def forward(self, x):
+        pair_state = self.pairwise(x)
+
+        # Create attention bias from pairwise state
+        attention_bias = self.attention_bias_proj(pair_state)
+        attention_bias = attention_bias.permute(0, 3, 1, 2)
+
+        # Repeat to match sequence length if needed
+        if attention_bias.shape[-1] != x.shape[1]:
+            repeat_factor = x.shape[1] // attention_bias.shape[-1]
+            attention_bias = attention_bias.repeat_interleave(repeat_factor, dim=-1)
+            attention_bias = attention_bias.repeat_interleave(repeat_factor, dim=-2)
+
+        attn_out = self.attention(x, attention_bias)
+        x = x + attn_out
+
+        mlp_out = self.mlp(x)
+        x = x + mlp_out
+
+        return x, pair_state
+
+
+class UpResBlock(nn.Module):
+    def __init__(self, dim: int, unet_skip: int):
+        super().__init__()
+        self.dim = dim
+        #self.out_dim = out_dim = unet_skip.shape[2]
+        self.out_dim = unet_skip
+        print(f'Input dim: {dim}')
+
+        self.conv1 = ConvBlock(dim, self.out_dim)
+        self.skip_conv = ConvBlock(self.out_dim, self.out_dim, kernel_size=1)
+        self.conv2 = ConvBlock(self.out_dim, self.out_dim)
+        self.residual_scale = nn.Parameter(torch.tensor(0.9))
+
+    def forward(self, x, skip):
+        out = self.conv1(x) + x[:, :self.out_dim, :]
+        out = torch.repeat_interleave(out, 2, dim=2) * self.residual_scale
+        out += self.skip_conv(skip)
+        return out + self.conv2(out)
+
+
+class SequenceDecoder(nn.Module):
+    def __init__(self, base_dim=128, feat_growth: int=4, layers: int=4, 
+    intermediate_dims = None,
+    
+    ):
+        super().__init__()
+        # Reverse the encoder dimensions
+        self.layers = layers
+        dims = [base_dim + (self.layers-1) * feat_growth] + [base_dim + i*feat_growth for i in reversed(range(layers))][:-1]
+        skip_dims = [base_dim + (i)*feat_growth for i in reversed(range(layers))]
+        skip_dims[-1] = base_dim
+        print(f'The Input dims {dims}')
+        print(f'The decoder dims: {skip_dims}')
+        # Maybe just pass in a dict with the intermediate dims?
+
+        self.up_blocks = nn.ModuleList(
+            [UpResBlock(dims[i], skip_dims[i]) for i in range(layers)]
+        )
+
+    def forward(self, x, intermediates):
+        bin_sizes = list(reversed([2**(i+1) for i in range(self.layers-1)]))
+        print(bin_sizes)
+        for i, (up_block, bin_size) in enumerate(zip(self.up_blocks, bin_sizes)):
+            skip = intermediates[f"bin_size_{bin_size}"]
+            print(f"Skip shape {skip.shape}")
+            x = up_block(x, skip)
+
+        return x
+
+
+class EColiOutputHead(nn.Module):
+    def __init__(self, dim, num_tracks=1):
+        super().__init__()
+        self.num_tracks = num_tracks
+
+        self.norm = nn.LayerNorm(dim)
+        self.proj = nn.Linear(dim, dim * 2)
+        self.activation = nn.GELU()
+        self.output_proj = nn.Linear(dim * 2, num_tracks)
+
+    def forward(self, x):
+        x = self.norm(x)
+        x = self.proj(x)
+        x = self.activation(x)
+        x = self.output_proj(x)
+
+        if self.num_tracks == 1:
+            x = x.squeeze(-1)
+
+        return x
+
+
+class MiniAlphaGenome(nn.Module):
+    def __init__(self, base_dim=128, heads=4, dim_head=32, pair_dim=32, num_tracks=1):
+        super().__init__()
+
+        self.encoder = SequenceEncoder(base_dim)
+        # self.transformer = TransformerTower(base_dim + 96, heads, dim_head, pair_dim)
+        self.decoder = SequenceDecoder(base_dim)
+        #self.output_head = EColiOutputHead(base_dim, num_tracks)
+
+    def forward(self, x):
+        trunk, intermediates = self.encoder(x)
+        print(f'Trunk shape {trunk.shape}')
+        print('int items')
+        print([(i, j.shape) for i, j in intermediates.items()])
+        # trunk, pair_state = self.transformer(trunk)
+        decoded = self.decoder(trunk, intermediates)
+        # output = self.output_head(decoded)
+
+        # return output, pair_state
+        return decoded, intermediates
+
+
+class OutputEmbedding(nn.Module):
+    def __init__(self, dim: int, organism_index: int, skip_x: torch.Tensor) -> torch.Tensor:
+        self.linear = nn.Linear(2 * dim)
+        if skip_x not None:
+            pass
+        else: pass
+
+
+def multinomial_liss(
+    x: torch.Tensor,
+    targets: torch.Tensor,
+    multinomial_resolution: int
+):
+    x = x.reshape()
+
+        
+
+
+def create_mini_alphagenome(
+    sequence_length=1024, base_dim=128, heads=4, dim_head=32, pair_dim=32, num_tracks=1
+):
+    model = MiniAlphaGenome(
+        base_dim=base_dim,
+        heads=heads,
+        dim_head=dim_head,
+        pair_dim=pair_dim,
+        num_tracks=num_tracks,
+    )
+    return model
+
+
+
+
+
+if __name__ == "__main__":
+    # Create model
+    model = create_mini_alphgenome()
+
+    # Test with sample data
+    batch_size = 2
+    seq_len = 1024
+
+    # Random DNA sequence (one-hot encoded)
+    x = torch.randn(batch_size, seq_len, 4)
+    x = F.softmax(x, dim=-1)  # Convert to proper one-hot probabilities
+
+    print("Testing MiniAlphaGenome model...")
+    print(f"Input shape: {x.shape}")
+
+    # Forward pass
+    output, pair_state = model(x)
+
+    print(f"Output shape: {output.shape}")
+    #print(f"Pair state shape: {pair_state.shape}")
+    print(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
+    print(f"Model Encoder parameters: {sum(p.numel() for p in model.encoder.parameters()):,}")
+    print("\nModel created successfully!")
