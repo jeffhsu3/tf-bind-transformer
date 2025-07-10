@@ -165,22 +165,29 @@ def merge_bigwig_files(bw1_path: str, bw2_path: str, output_path: str, step_size
 
 def capitalize_tf_name(tf_name: str) -> str:
     """
-    Capitalize first and last letters of TF name.
+    Capitalize first and last letters of a TF name.
+    If the name contains an underscore, only the part before the first underscore is modified.
     
     Args:
         tf_name: Original TF name
         
     Returns:
-        TF name with first two letters capitalized
+        Capitalized TF name. e.g. 'gade' -> 'GadE', 'some_tf' -> 'SomE_tf'
     """
+    parts = tf_name.split('_', 1)
+    name_to_capitalize = parts[0]
 
-    if len(tf_name) >= 2:
-        atf_name = tf_name.split('_')[0]
-        return atf_name[0].upper() + atf_name[1:-1] + atf_name[-1].upper() + '_' + tf_name.split('_')[1]
-    elif len(tf_name) == 1:
-        return tf_name.upper()
+    if len(name_to_capitalize) >= 2:
+        capitalized_part = name_to_capitalize[0].upper() + name_to_capitalize[1:-1] + name_to_capitalize[-1].upper()
+    elif len(name_to_capitalize) == 1:
+        capitalized_part = name_to_capitalize.upper()
     else:
-        return tf_name
+        capitalized_part = name_to_capitalize
+    
+    if len(parts) > 1:
+        return capitalized_part + '_' + parts[1]
+    else:
+        return capitalized_part
 
 def main():
     parser = argparse.ArgumentParser(description='Merge and reheader ChIP-seq BigWig files')
