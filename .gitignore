@@ -131,3 +131,9 @@ dmypy.json
 .env
 .env
 .env
+
+# Datafiles
+*.bw
+*.bed
+*.faa
+*.bigWig

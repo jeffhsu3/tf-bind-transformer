@@ -9,6 +9,141 @@ from einops.layers.torch import Rearrange, Reduce
 from alpha_encoder import SequenceEncoder, ConvBlock
 
 
+class TFChIPSeqOutputHead(nn.Module):
+    """
+    Output head for TF ChIP-seq tracks as described in Alpha Genome paper.
+    Applies softplus activation and learnable per-track scaling.
+    """
+    def __init__(self, input_dim: int, num_tracks: int):
+        super().__init__()
+        self.num_tracks = num_tracks
+        self.linear = nn.Linear(input_dim, num_tracks)
+        # Initialize scale parameter to 0.0 as specified in paper
+        self.scale = nn.Parameter(torch.zeros(num_tracks))
+    
+    def forward(self, embeddings):
+        x = self.linear(embeddings)
+        return F.softplus(x) * F.softplus(self.scale)
+
+
+def targets_scaling(targets, track_means, apply_squashing=False):
+    """
+    Scale targets before loss calculation for numerical stability. This should be down on the data itself beforehand
+
+    Args:
+        targets: Array of shape [seq_len, num_tracks]
+        track_means: Array of shape [num_tracks] with pre-calculated means
+        apply_squashing: bool, whether to apply power transformation (RNA-seq only)
+    
+    Returns:
+        Scaled targets
+    """
+    # Normalize by track means
+    targets = targets / track_means
+    
+    # Apply power transformation for RNA-seq tracks only
+    if apply_squashing:
+        targets = targets ** 0.75
+    
+    # Apply smooth clipping for high values
+    return torch.where(targets > 10.0, 
+                      2 * torch.sqrt(targets * 10.0) - 10.0, 
+                      targets)
+
+
+def predictions_scaling(x, track_means, apply_squashing=False):
+    """
+    Inverse scaling for predictions to match original experimental data scale.
+    
+    Args:
+        x: Predictions of shape [seq_len, num_tracks]
+        track_means: Array of shape [num_tracks] with pre-calculated means
+        apply_squashing: bool, whether to reverse power transformation
+    
+    Returns:
+        Inverse scaled predictions
+    """
+    # Reverse smooth clipping
+    x = torch.where(x > 10.0, 
+                   (x + 10.0) ** 2 / (4 * 10.0), 
+                   x)
+    
+    # Reverse power transformation for RNA-seq tracks
+    if apply_squashing:
+        x = x ** (1.0 / 0.75)
+    
+    # Reverse normalization
+    return x * track_means
+
+
+def multinomial_loss(predictions, targets, multinomial_resolution=1024):
+    """
+    Calculate multinomial loss combining Poisson and Multinomial NLL terms.
+    
+    Args:
+        predictions: Tensor of shape [batch_size, seq_len, num_tracks]
+        targets: Tensor of shape [batch_size, seq_len, num_tracks]
+        multinomial_resolution: int, resolution for multinomial calculation (1024 for 128bp)
+    
+    Returns:
+        Loss tensor
+    """
+    # Reshape to segments of multinomial_resolution
+    batch_size, seq_len, num_tracks = predictions.shape
+    num_segments = seq_len // multinomial_resolution
+    
+    # Reshape to [batch_size * num_segments, multinomial_resolution, num_tracks]
+    x = predictions[:, :num_segments * multinomial_resolution, :].reshape(
+        batch_size * num_segments, multinomial_resolution, num_tracks)
+    targets_reshaped = targets[:, :num_segments * multinomial_resolution, :].reshape(
+        batch_size * num_segments, multinomial_resolution, num_tracks)
+    
+    # Sum over bins within each segment
+    sum_pred = torch.sum(x, dim=1, keepdim=True)  # [batch*segments, 1, tracks]
+    sum_target = torch.sum(targets_reshaped, dim=1, keepdim=True)  # [batch*segments, 1, tracks]
+    
+    # Poisson NLL term: sum(pred) - sum(target) * log(sum(pred) + eps)
+    poisson_loss = torch.sum(sum_pred - sum_target * torch.log(sum_pred + 1e-7))
+    
+    # Multinomial probability distribution
+    multinomial_prob = x / (sum_pred + 1e-7)
+    
+    # Multinomial NLL term: -sum(target * log(prob + eps))
+    positional_loss = torch.sum(-targets_reshaped * torch.log(multinomial_prob + 1e-7))
+    
+    # Combine losses with specified weights
+    return (poisson_loss / multinomial_resolution + 5.0 * positional_loss)
+
+
+class TFChIPSeqLoss(nn.Module):
+    """
+    Complete loss function for TF ChIP-seq tracks following Alpha Genome paper.
+    """
+    def __init__(self, track_means, multinomial_resolution=1024):
+        super().__init__()
+        self.track_means = track_means
+        self.multinomial_resolution = multinomial_resolution
+    
+    def forward(self, predictions, targets):
+        """
+        Calculate loss for TF ChIP-seq tracks.
+        
+        Args:
+            predictions: Raw model predictions [batch_size, seq_len, num_tracks]
+            targets: Ground truth targets [batch_size, seq_len, num_tracks]
+        
+        Returns:
+            Loss value
+        """
+        # Scale targets (no squashing for ChIP-seq)
+        scaled_targets = targets_scaling(targets, self.track_means, apply_squashing=False)
+        
+        # Calculate multinomial loss
+        loss = multinomial_loss(predictions, scaled_targets, self.multinomial_resolution)
+        
+        return loss
+
+
 class RotaryEmbedding(nn.Module):
     def __init__(self, dim, max_position=1024):
         super().__init__()
@@ -259,24 +394,6 @@ class MiniAlphaGenome(nn.Module):
         return decoded, intermediates
 
 
-class OutputEmbedding(nn.Module):
-    def __init__(self, dim: int, organism_index: int, skip_x: torch.Tensor) -> torch.Tensor:
-        self.linear = nn.Linear(2 * dim)
-        if skip_x not None:
-            pass
-        else: pass
-
-
-def multinomial_liss(
-    x: torch.Tensor,
-    targets: torch.Tensor,
-    multinomial_resolution: int
-):
-    x = x.reshape()
-
-        
-
-
 def create_mini_alphagenome(
     sequence_length=1024, base_dim=128, heads=4, dim_head=32, pair_dim=32, num_tracks=1
 ):
@@ -291,11 +408,9 @@ def create_mini_alphagenome(
 
 
 
-
-
 if __name__ == "__main__":
     # Create model
-    model = create_mini_alphgenome()
+    model = create_mini_alphagenome()
 
     # Test with sample data
     batch_size = 2
@@ -316,3 +431,51 @@ if __name__ == "__main__":
     print(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
     print(f"Model Encoder parameters: {sum(p.numel() for p in model.encoder.parameters()):,}")
     print("\nModel created successfully!")
+    
+    # Example usage of TF ChIP-seq loss function
+    print("\n" + "="*50)
+    print("Testing TF ChIP-seq Loss Function")
+    print("="*50)
+    
+    # Create sample data for loss function testing
+    batch_size = 2
+    seq_len = 8192  # 128bp resolution sequence length
+    num_tracks = 4
+    
+    # Create TF ChIP-seq output head
+    input_dim = 128  # Assuming 128-dimensional embeddings
+    tf_head = TFChIPSeqOutputHead(input_dim, num_tracks)
+    
+    # Sample embeddings from the model
+    embeddings = torch.randn(batch_size, seq_len, input_dim)
+    
+    # Generate predictions using the output head
+    predictions = tf_head(embeddings)
+    print(f"Predictions shape: {predictions.shape}")
+    print(f"Predictions min/max: {predictions.min().item():.4f} / {predictions.max().item():.4f}")
+    
+    # Create sample targets (ChIP-seq read counts)
+    targets = torch.poisson(torch.ones(batch_size, seq_len, num_tracks) * 2.0)
+    print(f"Targets shape: {targets.shape}")
+    print(f"Targets min/max: {targets.min().item():.4f} / {targets.max().item():.4f}")
+    
+    # Pre-calculated track means (would be calculated from entire dataset)
+    track_means = torch.tensor([1.5, 2.0, 1.8, 2.2])
+    
+    # Create loss function
+    loss_fn = TFChIPSeqLoss(track_means, multinomial_resolution=1024)
+    
+    # Calculate loss
+    loss = loss_fn(predictions, targets)
+    print(f"TF ChIP-seq loss: {loss.item():.4f}")
+    
+    # Test scaling functions
+    print("\nTesting scaling functions...")
+    scaled_targets = targets_scaling(targets, track_means, apply_squashing=False)
+    print(f"Scaled targets shape: {scaled_targets.shape}")
+    
+    # Test inverse scaling
+    rescaled_predictions = predictions_scaling(predictions, track_means, apply_squashing=False)
+    print(f"Rescaled predictions shape: {rescaled_predictions.shape}")
+    
+    print("\nTF ChIP-seq loss function implementation complete!")
