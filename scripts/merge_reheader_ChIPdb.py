@@ -25,6 +25,10 @@ import subprocess
 from typing import Dict, List, Tuple, Optional
 import argparse
 
+SPECIFIC_MAPPING = {
+    'ERR475431': 'FliA_2'
+}
+
 def find_bigwig_files(bigwig_folder: str) -> List[str]:
     """Find all BigWig files in the specified folder."""
     bw_pattern = os.path.join(bigwig_folder, "*.bw")
@@ -161,7 +165,7 @@ def merge_bigwig_files(bw1_path: str, bw2_path: str, output_path: str, step_size
 
 def capitalize_tf_name(tf_name: str) -> str:
     """
-    Capitalize first and second letters of TF name.
+    Capitalize first and last letters of TF name.
     
     Args:
         tf_name: Original TF name
@@ -169,8 +173,10 @@ def capitalize_tf_name(tf_name: str) -> str:
     Returns:
         TF name with first two letters capitalized
     """
+
     if len(tf_name) >= 2:
-        return tf_name[0].upper() + tf_name[1].upper() + tf_name[2:]
+        atf_name = tf_name.split('_')[0]
+        return atf_name[0].upper() + atf_name[1:-1] + atf_name[-1].upper() + '_' + tf_name.split('_')[1]
     elif len(tf_name) == 1:
         return tf_name.upper()
     else:
@@ -224,15 +230,16 @@ def main():
             
             # Create output filename
             capitalized_tf = capitalize_tf_name(tf_name)
-            output_filename = f"{capitalized_tf}_condition.bw"
+            output_filename = f"{capitalized_tf}_merged.bw"
             output_path = os.path.join(bigwig_folder, output_filename)
+            output_path = os.path.join('/home/jeff/iv3/repos/tf-bind-transformer/tests/ChIPdb', output_filename)
             
             # Merge files
             success, correlation = merge_bigwig_files(
                 file1,
                 file2,
                 output_path,
-                step_size=128,
+                step_size=1,
             )
             print(f"    Spearman correlation: {correlation:.4f}")
             
