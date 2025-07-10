@@ -72,89 +72,92 @@ def group_files_by_tf(files: List[str]) -> Dict[str, Dict[str, str]]:
     
     return tf_groups
 
-# AI: Fix the following implementation of reading in a bigwig and averaging the values.  Make it at the base pair level if possible.  Also calculate the correlation of the values to be averaged. AI!
-def merge_bigwig_files(bw1_path: str, bw2_path: str, output_path: str, step_size: int) -> tuple(bool, float):
+def merge_bigwig_files(bw1_path: str, bw2_path: str, output_path: str, step_size: int) -> Tuple[bool, float]:
     """
-    Merge two BigWig files by averaging their values.
+    Merge two BigWig files by averaging their values over given intervals.
     
     Args:
         bw1_path: Path to first BigWig file
         bw2_path: Path to second BigWig file  
         output_path: Path for merged output file
-        step_size: Step_size to merge ChiPseq.  Alpha genome merges at 128 interval bins
+        step_size: Interval size for averaging (bin size).
         
     Returns:
-        True if successful, False otherwise
+        Tuple of (success, spearman_correlation)
     """
-    bw1 = pyBigWig.open(bw1_path)
-    bw2 = pyBigWig.open(bw2_path)
-    bw_out = pyBigWig.open(output_path, "w")
-    
     try:
-        # Get chromosome info
-        chroms1 = bw1.chroms()
-        chroms2 = bw2.chroms()
-        
-        if not chroms1 or not chroms2:
-            print(f"Warning: Empty chromosome info in {bw1_path} or {bw2_path}")
-            return False
-            
-        # Use first chromosome and ensure it exists in both files
-        chrom = list(chroms1.keys())[0]
-        if chrom not in chroms2:
-            print(f"Warning: Chromosome {chrom} not found in both files")
-            return False
+        with pyBigWig.open(bw1_path) as bw1, \
+             pyBigWig.open(bw2_path) as bw2, \
+             pyBigWig.open(output_path, "w") as bw_out:
 
-        assert chroms1[chrom] == chroms2[chrom]
-        length = chroms1[chrom]
-        correlations = []
-        
-        for start in range(0, length, step_size):
-            end = min(start + step_size, length)
+            chroms1 = bw1.chroms()
+            chroms2 = bw2.chroms()
             
-            # Get values for this interval
-            vals1 = bw1.values(chrom, start, end)
-            vals2 = bw2.values(chrom, start, end)
-            correlation = spearmanr(vals1, vals2)[0]
+            if not chroms1 or not chroms2:
+                print(f"Warning: Empty chromosome info in {bw1_path} or {bw2_path}")
+                return False, np.nan
+                
+            common_chroms = {k: v for k, v in chroms1.items() if k in chroms2 and chroms1[k] == chroms2[k]}
+            if not common_chroms:
+                print(f"Warning: No common chromosomes found between {bw1_path} and {bw2_path}")
+                return False, np.nan
 
-            correlations.append(correlation)
-            
-            # Calculate average, handling None values
-            valid_vals = []
-            for v1, v2 in zip(vals1, vals2):
-                if v1 is not None and v2 is not None and not np.isnan(v1) and not np.isnan(v2):
-                    valid_vals.append((v1 + v2) / 2)
-                elif v1 is not None and not np.isnan(v1):
-                    valid_vals.append(v1)
-                elif v2 is not None and not np.isnan(v2):
-                    valid_vals.append(v2)
-            
-            '''
-            if valid_vals:
-                avg_val = np.mean(valid_vals)
-                if avg_val > 0:  # Only write non-zero values
-                    tmp_bg.write(f"U00096.3\t{start}\t{end}\t{avg_val:.6f}\n")
-            '''
-            bw_out.write()
+            header = []
+            output_chrom_map = {}
+            for chrom, length in common_chroms.items():
+                output_chrom = 'U00096.3' if chrom == 'NC_000913.3' else chrom
+                output_chrom_map[chrom] = output_chrom
+                header.append((output_chrom, length))
+            bw_out.addHeader(header)
 
-        
-        # Convert bedGraph to BigWig with correct chromosome name
-        # Create chromosome sizes file
-        #tmp_sizes_path = tmp_sizes.name
-        #tmp_sizes.write(f"U00096.3\t{length}\n")
-        out_corr = np.mean(correlations)
-        success = True
-        bw1.close()
-        bs2.close()
-        bw_out.close()
-        return success, out_corr 
-        
+            all_means1 = []
+            all_means2 = []
+
+            for chrom, length in common_chroms.items():
+                output_chrom = output_chrom_map[chrom]
+                
+                starts, ends, values = [], [], []
+
+                for start in range(0, length, step_size):
+                    end = min(start + step_size, length)
+                    if start >= end:
+                        continue
+
+                    # Get mean values for this interval, ignoring NaNs
+                    mean1 = bw1.stats(chrom, start, end, type="mean")[0]
+                    mean2 = bw2.stats(chrom, start, end, type="mean")[0]
+
+                    avg_val = None
+                    if mean1 is not None and mean2 is not None:
+                        avg_val = (mean1 + mean2) / 2
+                        all_means1.append(mean1)
+                        all_means2.append(mean2)
+                    elif mean1 is not None:
+                        avg_val = mean1
+                    elif mean2 is not None:
+                        avg_val = mean2
+                    
+                    if avg_val is not None and avg_val > 0:
+                        starts.append(start)
+                        ends.append(end)
+                        values.append(avg_val)
+
+                if starts:
+                    bw_out.addEntries([output_chrom] * len(starts), starts, ends=ends, values=values)
+
+            correlation = np.nan
+            if len(all_means1) >= 2:
+                # spearmanr returns nan for constant input
+                with np.errstate(invalid='ignore'):
+                    correlation, _ = spearmanr(all_means1, all_means2)
+                    if np.isnan(correlation):
+                        correlation = 0.0 # if std dev is 0, consider correlation 0.
+
+            return True, correlation
+
     except Exception as e:
         print(f"Error merging {bw1_path} and {bw2_path}: {e}")
-        return False
-    finally:
-        bw1.close()
-        bw2.close()
+        return False, np.nan
 
 def capitalize_tf_name(tf_name: str) -> str:
     """
