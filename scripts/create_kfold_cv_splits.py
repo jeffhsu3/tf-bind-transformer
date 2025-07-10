@@ -219,6 +219,12 @@ def main():
         default=42,
         help="Random seed for reproducibility (default: 42).",
     )
+    parser.add_argument(
+        "--validation_split_ratio",
+        type=float,
+        default=0.0,
+        help="Proportion of training data to use for validation (e.g., 0.1 for 10%). Defaults to 0.0 (no validation split).",
+    )
 
     args = parser.parse_args()
 
@@ -254,6 +260,9 @@ def main():
         print(
             "Warning: --loci_bed_file is provided, so --fasta_file and related arguments for random loci generation will be ignored."
         )
+    if not (0.0 <= args.validation_split_ratio < 1.0):
+        parser.error("--validation_split_ratio must be between 0.0 and 1.0 (exclusive of 1.0).")
+
 
     output_path = Path(args.output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
@@ -294,6 +303,33 @@ def main():
         train_df = loci_df[train_indices_list]
         test_df = loci_df[test_indices_list]
 
+        if args.validation_split_ratio > 0.0:
+            # Shuffle train_df before splitting to ensure randomness
+            # Note: KFold already shuffles the initial dataset if shuffle=True,
+            # but we might want an independent shuffle for the train/validation split
+            # or rely on KFold's initial shuffle. For simplicity here, let's
+            # assume KFold's shuffle is sufficient for now, or one could re-shuffle train_df.
+            # Re-shuffling train_df before splitting for validation:
+            train_df = train_df.sample(fraction=1.0, shuffle=True, seed=args.seed + fold_num) # ensure different seed per fold for this shuffle
+
+            num_validation_samples = int(len(train_df) * args.validation_split_ratio)
+            if num_validation_samples == 0 and len(train_df) > 0 and args.validation_split_ratio > 0:
+                # Ensure at least one sample for validation if ratio is non-zero and data exists
+                num_validation_samples = 1
+
+            if num_validation_samples > 0 and num_validation_samples < len(train_df):
+                validation_df = train_df.slice(0, num_validation_samples)
+                train_df = train_df.slice(num_validation_samples, len(train_df) - num_validation_samples)
+
+                validation_file_path = output_path / f"fold_{fold_num}_validation_loci.bed"
+                write_bed_file(validation_df, str(validation_file_path))
+                print(f"  Saved validation loci to {validation_file_path} ({len(validation_df)} regions)")
+            else:
+                # Not enough data to create a validation set, or ratio is too small
+                # Keep all data for training in this case
+                print(f"  Warning: Not enough data or validation_split_ratio too small for fold {fold_num}. Skipping validation split for this fold. All {len(train_df)} samples used for training.")
+                validation_df = pl.DataFrame() # Empty dataframe
+
         train_file_path = output_path / f"fold_{fold_num}_train_loci.bed"
         test_file_path = output_path / f"fold_{fold_num}_test_loci.bed"
 
@@ -302,6 +338,7 @@ def main():
 
         print(f"  Saved training loci to {train_file_path} ({len(train_df)} regions)")
         print(f"  Saved testing loci to {test_file_path} ({len(test_df)} regions)")
+
 
     print("K-fold cross-validation splits created successfully.")
 
