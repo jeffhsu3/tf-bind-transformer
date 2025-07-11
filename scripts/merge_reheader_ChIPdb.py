@@ -232,14 +232,24 @@ def main():
             print(f"    Replicate 1: {os.path.basename(file1)}")
             print(f"    Replicate 2: {os.path.basename(file2)}")
             
-            # Calculate correlation
-            #correlation = calculate_spearman_correlation(file1, file2)
-            
             # Create output filename
             capitalized_tf = capitalize_tf_name(tf_name)
             output_filename = f"{capitalized_tf}_merged.bw"
             output_path = os.path.join(bigwig_folder, output_filename)
             output_path = os.path.join('/home/jeff/iv3/repos/tf-bind-transformer/tests/ChIPdb', output_filename)
+            
+            # Check if output file already exists
+            if os.path.exists(output_path):
+                print(f"    Skipping {output_filename}, already exists.")
+                results.append({
+                    'original_file_1': os.path.basename(file1),
+                    'original_file_2': os.path.basename(file2),
+                    'output_merged_file': output_filename,
+                    'spearman_correlation': np.nan,
+                    'tf_name': tf_name,
+                    'capitalized_tf_name': capitalized_tf
+                })
+                continue
             
             # Merge files
             success, correlation = merge_bigwig_files(
@@ -248,7 +258,9 @@ def main():
                 output_path,
                 step_size=1,
             )
-            print(f"    Spearman correlation: {correlation:.4f}")
+
+            if not np.isnan(correlation):
+                print(f"    Spearman correlation: {correlation:.4f}")
             
             if success:
                 print(f"    Successfully merged to: {output_filename}")
