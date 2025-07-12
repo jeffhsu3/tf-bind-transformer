@@ -6,13 +6,14 @@ from sklearn.model_selection import KFold
 from pathlib import Path
 import random
 import yaml
+from intervaltree import Interval, IntervalTree
 
 
 def generate_random_loci(
     fasta_file: str, num_loci: int, locus_length: int, seed: int
 ) -> pl.DataFrame:
     """
-    Generates random genomic loci from a FASTA file.
+    Generates random, non-overlapping genomic loci from a FASTA file.
 
     Args:
         fasta_file (str): Path to the FASTA file.
@@ -28,43 +29,54 @@ def generate_random_loci(
 
     fasta = Fasta(fasta_file)
     loci_list = []
+    interval_trees = {chrom: IntervalTree() for chrom in fasta.keys()}
 
     chrom_keys = sorted(list(fasta.keys()))  # Ensure consistent order
 
-    attempts = 0
-    max_attempts_per_locus = 100  # To prevent infinite loops if space is tight
+    max_attempts_per_locus = 1000  # Increased attempts for non-overlapping constraint
 
-    for i in range(num_loci):
-        locus_generated = False
+    loci_generated_count = 0
+    while loci_generated_count < num_loci:
+        chrom_name = random.choice(chrom_keys)
+        chromosome = fasta[chrom_name]
+        chrom_len = len(chromosome)
+
+        if chrom_len < locus_length:
+            continue
+
         for _ in range(max_attempts_per_locus):
-            chrom_name = random.choice(chrom_keys)
-            chromosome = fasta[chrom_name]
-            chrom_len = len(chromosome)
-
-            if chrom_len < locus_length:
-                continue
-
             start = np.random.randint(0, chrom_len - locus_length + 1)
             end = start + locus_length
-            loci_list.append(
-                {
-                    "chrom": chrom_name,
-                    "start": start,
-                    "end": end,
-                    "name": f"random_locus_{i+1}",
-                }
-            )
-            locus_generated = True
-            break
-        if not locus_generated:
+
+            # Check for overlaps
+            if not interval_trees[chrom_name].overlaps(start, end):
+                interval_trees[chrom_name].add(Interval(start, end))
+                loci_list.append(
+                    {
+                        "chrom": chrom_name,
+                        "start": start,
+                        "end": end,
+                        "name": f"random_locus_{loci_generated_count + 1}",
+                    }
+                )
+                loci_generated_count += 1
+                break  # Move to the next locus
+        else:  # This else corresponds to the for loop
             print(
-                f"Warning: Could not generate locus {i+1} after {max_attempts_per_locus} attempts. Chromosome lengths might be too short or num_loci too high."
+                f"Warning: Could not generate non-overlapping locus after {max_attempts_per_locus} attempts. "
+                f"Generated {loci_generated_count}/{num_loci} loci so far. "
+                "Consider reducing num_loci, locus_length, or checking chromosome sizes."
             )
+            # Decide if to continue or stop. For now, let's stop to avoid long runtimes.
+            break
 
     if not loci_list:
         raise ValueError(
             "No loci could be generated. Check FASTA file content and locus_length."
         )
+
+    if loci_generated_count < num_loci:
+        print(f"Warning: Only generated {loci_generated_count} out of {num_loci} requested loci.")
 
     return pl.DataFrame(
         loci_list,

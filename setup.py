@@ -35,6 +35,7 @@ setup(
     'transformers>=4.0',
     'tqdm',
     'pyBigWig',
+    'intervaltree',
   ],
   classifiers=[
     'Development Status :: 4 - Beta',
