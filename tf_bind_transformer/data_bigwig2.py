@@ -159,15 +159,19 @@ def get_bigwig_tracks_dataloader(ds, cycle_iter=True, **kwargs):
 
     Args:
         ds (BigWigTracksOnlyDataset): The dataset.
-        cycle_iter (bool, optional): Whether to cycle the iterator. Defaults to True.
+        cycle_iter (bool, optional): If True, wraps DataLoader in a cycle iterator for infinite looping.
+                                     If False, returns the standard DataLoader. Defaults to True.
         **kwargs: Additional arguments for DataLoader.
 
     Returns:
-        torch.utils.data.DataLoader: The DataLoader instance.
+        torch.utils.data.DataLoader or an iterator: The DataLoader instance or a cycling iterator.
     """
     dataset_len = len(ds)
     batch_size = kwargs.get("batch_size")
     drop_last = dataset_len > batch_size
     dl = DataLoader(ds, drop_last=drop_last, **kwargs)
-    wrapper = cycle if cycle_iter else iter
-    return wrapper(dl)
+
+    if cycle_iter:
+        return cycle(dl)
+
+    return dl
