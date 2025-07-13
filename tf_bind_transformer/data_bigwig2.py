@@ -153,13 +153,13 @@ class BigWigTracksOnlyDataset(Dataset):
         return seq, label
 
 
-def get_bigwig_tracks_dataloader(ds, cycle_iter=False, **kwargs):
+def get_bigwig_tracks_dataloader(ds, cycle_iter=True, **kwargs):
     """
     Returns a DataLoader for BigWigTracksOnlyDataset.
 
     Args:
         ds (BigWigTracksOnlyDataset): The dataset.
-        cycle_iter (bool, optional): Whether to cycle the iterator. Defaults to False.
+        cycle_iter (bool, optional): Whether to cycle the iterator. Defaults to True.
         **kwargs: Additional arguments for DataLoader.
 
     Returns:
