@@ -142,7 +142,12 @@ class BigWigTracksOnlyDataset(Dataset):
 
         np.nan_to_num(om, copy=False)
 
-        # Divide label by annot_df column_3 values.  AI!
+        if hasattr(self, "annot") and self.annot is not None:
+            scaling_factors = (
+                self.annot["column_3"].fill_null(1.0).to_numpy().astype(np.float32)
+            )
+            scaling_factors[scaling_factors == 0] = 1.0
+            om = om / scaling_factors[np.newaxis, :]
 
         label = torch.Tensor(om)
         return seq, label
