@@ -69,7 +69,9 @@ class BigWigTracksOnlyDataset(Dataset):
             )
             #annot_df = annot_df.filter(pl.col("column_2") == ref)
             annot_df = filter_by_col_isin(annot_df, "column_2", bw_experiments)
-            # Reorder df to match bw_experiments. AI!
+            # Reorder annot_df to match the order of bw_experiments
+            order_df = pl.DataFrame({"column_2": bw_experiments})
+            annot_df = order_df.join(annot_df, on="column_2", how="left")
             self.annot = annot_df
 
         print(annot_df)
