@@ -29,7 +29,6 @@ class BigWigTracksOnlyDataset(Dataset):
     Dataset for loading and processing BigWig data for tracks only, without
     transcription factor protein sequences.
     """
-
     def __init__(
         self,
         *,
@@ -146,6 +145,7 @@ class BigWigTracksOnlyDataset(Dataset):
             scaling_factors = (
                 self.annot["column_3"].fill_null(1.0).to_numpy().astype(np.float32)
             )
+            # Similar scaling to alpha genome
             scaling_factors[scaling_factors == 0] = 1.0
             om = om / scaling_factors[np.newaxis, :]
 
@@ -168,7 +168,6 @@ def get_bigwig_tracks_dataloader(ds, cycle_iter=False, **kwargs):
     dataset_len = len(ds)
     batch_size = kwargs.get("batch_size")
     drop_last = dataset_len > batch_size
-
     dl = DataLoader(ds, drop_last=drop_last, **kwargs)
     wrapper = cycle if cycle_iter else iter
     return wrapper(dl)
