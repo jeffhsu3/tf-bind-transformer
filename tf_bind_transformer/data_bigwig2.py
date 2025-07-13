@@ -142,6 +142,8 @@ class BigWigTracksOnlyDataset(Dataset):
 
         np.nan_to_num(om, copy=False)
 
+        # Divide label by annot_df column_3 values.  AI!
+
         label = torch.Tensor(om)
         return seq, label
 
