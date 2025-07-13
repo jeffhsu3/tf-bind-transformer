@@ -56,6 +56,7 @@ class BigWigTracksOnlyDataset(Dataset):
         assert bigwig_folder.exists(), "bigwig folder does not exist"
 
         bw_experiments = [p.stem for p in bigwig_folder.glob("*.bw")]
+        print(bw_experiments)
         assert len(bw_experiments) > 0, "no bigwig files found in bigwig folder"
         loci = read_bed(enformer_loci_path)
 
@@ -64,11 +65,14 @@ class BigWigTracksOnlyDataset(Dataset):
                 annot_file,
                 separator="\t",
                 has_header=False,
-                columns=list(map(lambda i: f"column_{i + 1}", range(17))),
+                columns=list(map(lambda i: f"column_{i + 1}", range(4))),
             )
-            annot_df = annot_df.filter(pl.col("column_2") == ref)
-            annot_df = filter_by_col_isin(annot_df, "column_1", bw_experiments)
+            #annot_df = annot_df.filter(pl.col("column_2") == ref)
+            annot_df = filter_by_col_isin(annot_df, "column_2", bw_experiments)
+            # Reorder df to match bw_experiments. AI!
             self.annot = annot_df
+
+        print(annot_df)
 
         if exists(filter_sequences_by):
             col_name, col_val = filter_sequences_by
@@ -124,13 +128,15 @@ class BigWigTracksOnlyDataset(Dataset):
         else:
             raise ValueError(f"unknown reduction type {self.bigwig_reduction_type}")
 
-        output_length = output.shape[0]
+        output_length = om.shape[0]
 
         if output_length < self.target_length:
-            assert f"target length {self.target_length} cannot be less than the {output_length}"
+            raise ValueError(f"target length {self.target_length} cannot be less than the output length {output_length}")
 
-        trim = (output.shape[0] - self.target_length) // 2
-        om = om[trim:-trim]
+        if output_length > self.target_length:
+            trim = (output_length - self.target_length) // 2
+            om = om[trim:trim + self.target_length]
+        # If output_length == target_length, no trimming needed
 
         np.nan_to_num(om, copy=False)
 
