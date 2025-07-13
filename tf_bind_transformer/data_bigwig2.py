@@ -29,6 +29,7 @@ class BigWigTracksOnlyDataset(Dataset):
     Dataset for loading and processing BigWig data for tracks only, without
     transcription factor protein sequences.
     """
+
     def __init__(
         self,
         *,
@@ -55,7 +56,6 @@ class BigWigTracksOnlyDataset(Dataset):
         assert bigwig_folder.exists(), "bigwig folder does not exist"
 
         bw_experiments = [p.stem for p in bigwig_folder.glob("*.bw")]
-        print(bw_experiments)
         assert len(bw_experiments) > 0, "no bigwig files found in bigwig folder"
         loci = read_bed(enformer_loci_path)
 
@@ -72,8 +72,6 @@ class BigWigTracksOnlyDataset(Dataset):
             order_df = pl.DataFrame({"column_2": bw_experiments})
             annot_df = order_df.join(annot_df, on="column_2", how="left")
             self.annot = annot_df
-
-        print(annot_df)
 
         if exists(filter_sequences_by):
             col_name, col_val = filter_sequences_by
@@ -104,7 +102,6 @@ class BigWigTracksOnlyDataset(Dataset):
     def __getitem__(self, ind):
         chr_name, begin, end, _ = self.df.row(ind)
         seq = self.fasta(chr_name, begin, end)
-
         # calculate bigwig
         # properly downsample and then crop
         all_bw_values = []
@@ -153,25 +150,22 @@ class BigWigTracksOnlyDataset(Dataset):
         return seq, label
 
 
-def get_bigwig_tracks_dataloader(ds, cycle_iter=True, **kwargs):
+def get_bigwig_tracks_dataloader(ds, cycle_iter=False, **kwargs):
     """
     Returns a DataLoader for BigWigTracksOnlyDataset.
 
     Args:
         ds (BigWigTracksOnlyDataset): The dataset.
-        cycle_iter (bool, optional): If True, wraps DataLoader in a cycle iterator for infinite looping.
-                                     If False, returns the standard DataLoader. Defaults to True.
+        cycle_iter (bool, optional): Whether to cycle the iterator. Defaults to False.
         **kwargs: Additional arguments for DataLoader.
 
     Returns:
-        torch.utils.data.DataLoader or an iterator: The DataLoader instance or a cycling iterator.
+        torch.utils.data.DataLoader: The DataLoader instance.
     """
     dataset_len = len(ds)
     batch_size = kwargs.get("batch_size")
     drop_last = dataset_len > batch_size
+
     dl = DataLoader(ds, drop_last=drop_last, **kwargs)
-
-    if cycle_iter:
-        return cycle(dl)
-
-    return dl
+    wrapper = cycle if cycle_iter else iter
+    return wrapper(dl)

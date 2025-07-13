@@ -235,7 +235,7 @@ def main():
         "--validation_split_ratio",
         type=float,
         default=0.0,
-        help="Proportion of training data to use for validation (e.g., 0.1 for 10%). Defaults to 0.0 (no validation split).",
+        help="Proportion of training data to use for validation (e.g., 0.1). Defaults to 0.0",
     )
 
     args = parser.parse_args()

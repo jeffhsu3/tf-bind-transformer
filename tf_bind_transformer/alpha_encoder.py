@@ -121,7 +121,7 @@ class SequenceEncoder(nn.Module):
         self.down_blocks = nn.ModuleList(
             [DownResBlock(dims[i], 4) for i in range(layers-1)]
         )
-        self.max_pools = nn.ModuleList([nn.MaxPool1d(2) for _ in range(3)])
+        self.max_pools = nn.ModuleList([nn.MaxPool1d(2) for _ in range(layers-1)])
 
     def forward(self, x):
         intermediates = {}
@@ -143,7 +143,7 @@ class SequenceEncoder(nn.Module):
 
 if __name__ == "__main__":
     # Create model
-    model = SequenceEncoder(8)
+    model = SequenceEncoder(8, layers=5)
     # Test with sample data
     batch_size = 2
     seq_len = 1024
