@@ -51,7 +51,7 @@ dataset_test = BigWigTracksOnlyDataset(
     target_length=trunk_seqlen
 )
 
-dataloader = get_bigwig_tracks_dataloader(dataset_train, batch_size=4)
+dataloader = get_bigwig_tracks_dataloader(dataset_train, batch_size=4, cycle_iter=False)
 # Add an n_lyaer 
 model = create_mini_alphagenome(base_dim=32, layers=nlayers, num_targets=dataset_train.ntargets)
 BATCH_SIZE=2
@@ -99,7 +99,7 @@ num_epochs = 3
 step = 0
 
 # Create test dataloader
-test_dataloader = get_bigwig_tracks_dataloader(dataset_test, batch_size=BATCH_SIZE)
+test_dataloader = get_bigwig_tracks_dataloader(dataset_test, batch_size=BATCH_SIZE, cycle_iter=False)
 
 for epoch in range(num_epochs):
     # Training phase
