@@ -56,6 +56,7 @@ class BigWigTracksOnlyDataset(Dataset):
         assert bigwig_folder.exists(), "bigwig folder does not exist"
 
         bw_experiments = [p.stem for p in bigwig_folder.glob("*.bw")]
+        print(bw_experiments)
         assert len(bw_experiments) > 0, "no bigwig files found in bigwig folder"
         loci = read_bed(enformer_loci_path)
 
@@ -68,10 +69,9 @@ class BigWigTracksOnlyDataset(Dataset):
             )
             #annot_df = annot_df.filter(pl.col("column_2") == ref)
             annot_df = filter_by_col_isin(annot_df, "column_2", bw_experiments)
-            # Reorder annot_df to match the order of bw_experiments
-            order_df = pl.DataFrame({"column_2": bw_experiments})
-            annot_df = order_df.join(annot_df, on="column_2", how="left")
             self.annot = annot_df
+
+        print(annot_df)
 
         if exists(filter_sequences_by):
             col_name, col_val = filter_sequences_by
@@ -102,6 +102,7 @@ class BigWigTracksOnlyDataset(Dataset):
     def __getitem__(self, ind):
         chr_name, begin, end, _ = self.df.row(ind)
         seq = self.fasta(chr_name, begin, end)
+
         # calculate bigwig
         # properly downsample and then crop
         all_bw_values = []
@@ -138,14 +139,6 @@ class BigWigTracksOnlyDataset(Dataset):
 
         np.nan_to_num(om, copy=False)
 
-        if hasattr(self, "annot") and self.annot is not None:
-            scaling_factors = (
-                self.annot["column_3"].fill_null(1.0).to_numpy().astype(np.float32)
-            )
-            # Similar scaling to alpha genome
-            scaling_factors[scaling_factors == 0] = 1.0
-            om = om / scaling_factors[np.newaxis, :]
-
         label = torch.Tensor(om)
         return seq, label
 
@@ -164,6 +157,11 @@ def get_bigwig_tracks_dataloader(ds, cycle_iter=False, **kwargs):
     """
     dataset_len = len(ds)
     batch_size = kwargs.get("batch_size")
+    drop_last = dataset_len > batch_size
+
+    dl = DataLoader(ds, drop_last=drop_last, **kwargs)
+    wrapper = cycle if cycle_iter else iter
+    return wrapper(dl)
     drop_last = dataset_len > batch_size
 
     dl = DataLoader(ds, drop_last=drop_last, **kwargs)

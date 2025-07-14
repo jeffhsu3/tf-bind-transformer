@@ -137,3 +137,9 @@ dmypy.json
 *.bed
 *.faa
 *.bigWig
+*wandb/
+tests/snakemake/
+tests/tfactor_faa/
+tests/bigwig_track_means.pkl
+tests/bigwig_track_means.csv
+scripts/merged_bigwig_summary.csv
