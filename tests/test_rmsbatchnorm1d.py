@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.testing import assert_close
-from tf_bind_transformer import RMSBatchNorm1d
+from tf_bind_transformer.alpha_encoder import RMSBatchNorm1d
 
 def test_rms_batchnorm1d_training_behavior():
     torch.manual_seed(0)

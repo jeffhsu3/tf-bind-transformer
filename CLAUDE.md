@@ -6,12 +6,20 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### Installation and Setup
 ```bash
-# Install package dependencies
-python setup.py install --user
+# Install package in development mode
+pip install -e .
 
-# Install additional required packages
+# Or install from PyPI (when available)
+pip install tf-bind-transformer
+
+# Install development dependencies (optional)
+pip install -e ".[dev]"
+
+# Install additional conda packages (if using conda)
 conda install --channel conda-forge --channel bioconda pybedtools pyBigWig
-pip install polars scikit-learn pyfaidx
+
+# Set up pre-commit hooks (for development)
+pre-commit install
 ```
 
 ### Testing
@@ -24,6 +32,16 @@ python -m unittest tests.test_data_bigwig
 
 # Alternative: Run tests with pytest (compatible)
 pytest tests/ -v
+```
+
+### Code Quality
+```bash
+# Run linting and formatting with ruff
+ruff check .
+ruff format .
+
+# Run pre-commit hooks manually
+pre-commit run --all-files
 ```
 
 ### K-Fold Cross-Validation
